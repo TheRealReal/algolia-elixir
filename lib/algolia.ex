@@ -39,6 +39,12 @@ defmodule Algolia do
       raise MissingAPIKeyError
   end
 
+  def pool_name do
+    System.get_env("ALGOLIA_HACKNEY_POOL_NAME") ||
+      Application.get_env(:algolia, :hackney_pool_name) ||
+      :default
+  end
+
   defp host(:read, 0), do: "#{application_id()}-dsn.algolia.net"
   defp host(:write, 0), do: "#{application_id()}.algolia.net"
 
@@ -163,7 +169,8 @@ defmodule Algolia do
       path_encode_fun: &URI.encode/1,
       connect_timeout: 3_000 * (curr_retry + 1),
       recv_timeout: 30_000 * (curr_retry + 1),
-      ssl_options: [{:versions, [:"tlsv1.2"]}]
+      ssl_options: [{:versions, [:"tlsv1.2"]}],
+      pool: pool_name()
     ])
     |> case do
       {:ok, code, _headers, response} when code in 200..299 ->
