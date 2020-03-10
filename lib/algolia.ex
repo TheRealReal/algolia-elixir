@@ -29,6 +29,8 @@ defmodule Algolia do
     defexception message: "The ObjectID cannot be an empty string"
   end
 
+  @json_codec Application.get_env(:algolia, :json_codec, Jason)
+
   def application_id do
     System.get_env("ALGOLIA_APPLICATION_ID") || Application.get_env(:algolia, :application_id) ||
       raise MissingApplicationIDError
@@ -37,6 +39,12 @@ defmodule Algolia do
   def api_key do
     System.get_env("ALGOLIA_API_KEY") || Application.get_env(:algolia, :api_key) ||
       raise MissingAPIKeyError
+  end
+
+  def pool_name do
+    System.get_env("ALGOLIA_HACKNEY_POOL_NAME") ||
+      Application.get_env(:algolia, :hackney_pool_name) ||
+      :default
   end
 
   defp host(:read, 0), do: "#{application_id()}-dsn.algolia.net"
@@ -50,7 +58,7 @@ defmodule Algolia do
   """
   def multi(queries, opts \\ []) do
     path = Paths.multiple_queries(opts[:strategy])
-    body = queries |> format_multi() |> Jason.encode!()
+    body = queries |> format_multi() |> @json_codec.encode!()
 
     send_request(:read, %{method: :post, path: path, body: body, options: opts[:request_options]})
   end
@@ -141,7 +149,7 @@ defmodule Algolia do
     body =
       query
       |> Map.put("facetQuery", text)
-      |> Jason.encode!()
+      |> @json_codec.encode!()
 
     send_request(:read, %{method: :post, path: path, body: body})
   end
@@ -163,11 +171,12 @@ defmodule Algolia do
       path_encode_fun: &URI.encode/1,
       connect_timeout: 3_000 * (curr_retry + 1),
       recv_timeout: 30_000 * (curr_retry + 1),
-      ssl_options: [{:versions, [:"tlsv1.2"]}]
+      ssl_options: [{:versions, [:"tlsv1.2"]}],
+      pool: pool_name()
     ])
     |> case do
       {:ok, code, _headers, response} when code in 200..299 ->
-        {:ok, Jason.decode!(response)}
+        {:ok, @json_codec.decode!(response)}
 
       {:ok, code, _, response} ->
         {:error, code, response}
@@ -214,7 +223,7 @@ defmodule Algolia do
     if opts[:id_attribute] do
       save_object(index, object, opts)
     else
-      body = Jason.encode!(object)
+      body = @json_codec.encode!(object)
       path = Paths.index(index)
 
       :write
@@ -267,7 +276,7 @@ defmodule Algolia do
   end
 
   defp save_object(index, object, object_id, request_options) do
-    body = Jason.encode!(object)
+    body = @json_codec.encode!(object)
     path = Paths.object(index, object_id)
 
     :write
@@ -291,7 +300,7 @@ defmodule Algolia do
   Partially updates an object, takes option upsert: true or false
   """
   def partial_update_object(index, object, object_id, opts \\ [upsert?: true]) do
-    body = Jason.encode!(object)
+    body = @json_codec.encode!(object)
     path = Paths.partial_object(index, object_id, opts[:upsert?])
 
     :write
@@ -348,7 +357,7 @@ defmodule Algolia do
 
   defp send_batch_request(requests, index, request_options) do
     path = Paths.batch(index)
-    body = Jason.encode!(requests)
+    body = @json_codec.encode!(requests)
 
     :write
     |> send_request(%{method: :post, path: path, body: body, options: request_options})
@@ -423,7 +432,7 @@ defmodule Algolia do
       |> sanitize_delete_by_opts()
       |> validate_delete_by_opts!()
       |> Map.new()
-      |> Jason.encode!()
+      |> @json_codec.encode!()
 
     :write
     |> send_request(%{method: :post, path: path, body: body, options: request_options})
@@ -474,7 +483,7 @@ defmodule Algolia do
   Set the settings of a index
   """
   def set_settings(index, settings, opts \\ []) do
-    body = Jason.encode!(settings)
+    body = @json_codec.encode!(settings)
     path = Paths.settings(index, opts)
 
     :write
@@ -510,8 +519,8 @@ defmodule Algolia do
         }, ...]
       }}
   """
-  def export_synonyms(index) do
-    get_all_paginated_hits(index, &search_synonyms/3)
+  def export_synonyms(index, hits_per_page \\ 100) do
+    get_all_paginated_hits(index, &search_synonyms/3, hits_per_page)
   end
 
   defp get_all_paginated_hits(index, search, hits_per_page \\ 100) do
@@ -523,9 +532,17 @@ defmodule Algolia do
 
   defp get_page_hits(index, page, hits_per_page, search) do
     case search.(index, "", page: page, hits_per_page: hits_per_page) do
-      {:ok, %{"hits" => hits, "nbPages" => pages}} when page + 1 < pages -> page_hits(hits)
-      {:ok, %{"hits" => hits}} -> page_hits(hits) ++ [:stop]
-      error -> [error, :stop]
+      {:ok, %{"hits" => hits, "nbPages" => pages}} when page + 1 < pages ->
+        page_hits(hits)
+
+      {:ok, %{"hits" => hits, "nbHits" => nbHits}} when page + 1 < nbHits / hits_per_page ->
+        page_hits(hits)
+
+      {:ok, %{"hits" => hits}} ->
+        page_hits(hits) ++ [:stop]
+
+      error ->
+        [error, :stop]
     end
   end
 
@@ -565,7 +582,7 @@ defmodule Algolia do
       |> Map.put("page", opts[:page] || 0)
       |> Map.put("hitsPerPage", opts[:hits_per_page] || 20)
       |> Map.drop([:page, :hits_per_page])
-      |> Jason.encode!()
+      |> @json_codec.encode!()
 
     :write
     |> send_request(%{method: :post, path: Paths.search_synonyms(index), body: body})
@@ -590,7 +607,7 @@ defmodule Algolia do
   * `replaceExistingSynonyms`
   """
   def batch_synonyms(index, batch, opts \\ []) do
-    body = Jason.encode!(batch)
+    body = @json_codec.encode!(batch)
 
     :write
     |> send_request(%{method: :post, path: Paths.batch_synonyms(index, opts), body: body})
@@ -614,7 +631,7 @@ defmodule Algolia do
       |> Map.put("page", opts[:page] || 0)
       |> Map.put("hitsPerPage", opts[:hits_per_page] || 20)
       |> Map.drop([:page, :hits_per_page])
-      |> Jason.encode!()
+      |> @json_codec.encode!()
 
     :write
     |> send_request(%{method: :post, path: Paths.search_rules(index), body: body})
@@ -656,7 +673,7 @@ defmodule Algolia do
   * `clearExistingRules` When true, existing rules are cleared before adding this batch.
   """
   def batch_rules(index, batch, opts \\ []) do
-    body = Jason.encode!(batch)
+    body = @json_codec.encode!(batch)
 
     :write
     |> send_request(%{method: :post, path: Paths.batch_rules(index, opts), body: body})
@@ -667,7 +684,7 @@ defmodule Algolia do
   Moves an index to new one
   """
   def move_index(src_index, dst_index) do
-    body = Jason.encode!(%{operation: "move", destination: dst_index})
+    body = @json_codec.encode!(%{operation: "move", destination: dst_index})
 
     :write
     |> send_request(%{method: :post, path: Paths.operation(src_index), body: body})
@@ -678,7 +695,7 @@ defmodule Algolia do
   Copies an index to a new one
   """
   def copy_index(src_index, dst_index) do
-    body = Jason.encode!(%{operation: "copy", destination: dst_index})
+    body = @json_codec.encode!(%{operation: "copy", destination: dst_index})
 
     :write
     |> send_request(%{method: :post, path: Paths.operation(src_index), body: body})

@@ -28,12 +28,15 @@ Add to your dependencies
 
     ALGOLIA_APPLICATION_ID=YOUR_APPLICATION_ID
     ALGOLIA_API_KEY=YOUR_API_KEY
+    ALGOLIA_HACKNEY_POOL_NAME=YOUR_HACKNEY_POOL_NAME
 
 #### Using config:
 
     config :algolia,
       application_id: YOUR_APPLICATION_ID,
-      api_key: YOUR_API_KEY
+      api_key: YOUR_API_KEY,
+      hackney_pool_name: ALGOLIA_HACKNEY_POOL_NAME
+
 
 *NOTE: You must use ADMIN API_KEY instead of SEARCH API_KEY to enable write access*
 
