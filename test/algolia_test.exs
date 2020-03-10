@@ -383,6 +383,12 @@ defmodule AlgoliaTest do
         "type" => "oneWaySynonym",
         "objectID" => "785493758483",
         "input" => "little"
+      },
+       %{
+        "synonyms" => ["short"],
+        "type" => "oneWaySynonym",
+        "objectID" => "785493768501",
+        "input" => "small"
       }
     ]
 
@@ -391,7 +397,9 @@ defmodule AlgoliaTest do
       |> batch_synonyms(synonyms, replace_existing_synonyms: true)
       |> wait()
 
-    hits = @settings_test_index |> export_synonyms() |> Enum.map(& &1)
+    hits = @settings_test_index |> export_synonyms(2) |> Enum.map(& &1)
+
+    assert Enum.count(synonyms) == Enum.count(hits)
 
     for {:ok, hit} <- hits do
       synonym = Enum.find(synonyms, &(&1["objectID"] == hit["objectID"]))
